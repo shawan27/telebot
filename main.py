@@ -102,7 +102,6 @@ async def send_album(
             chunk_paths = paths[index : index + 10]
             chunk_messages = messages[index : index + 10]
             captions = [message.message or "" for message in chunk_messages]
-            entities = [message.entities or [] for message in chunk_messages]
 
             async def _send_chunk():
                 if len(chunk_paths) == 1:
@@ -119,7 +118,10 @@ async def send_album(
                     target,
                     chunk_paths,
                     caption=captions,
-                    formatting_entities=entities,
+                    # Telethon can raise "Subscripted generics cannot be used
+                    # with class and instance checks" for album entity lists.
+                    # Keep captions for album items, but let Telethon parse
+                    # them instead of passing per-item formatting entities.
                     force_document=False,
                 )
 
