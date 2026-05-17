@@ -1,0 +1,14 @@
+__pycache__/
+.pycache/
+*.py[cod]
+.venv/
+venv/
+
+*.session
+*.session-journal
+processed.sqlite3
+copy.log
+tmp_downloads/
+
+.env
+.DS_Store
