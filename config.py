@@ -18,6 +18,23 @@ def _split_csv(value: Optional[str], default: list[str]) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _read_message_links_file(path_value: Optional[str]) -> list[str]:
+    if not path_value:
+        return []
+
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        raise ValueError(f"Message links file does not exist: {path}")
+    if not path.is_file():
+        raise ValueError(f"Message links path is not a file: {path}")
+
+    return [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def _env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -127,7 +144,10 @@ class AppConfig:
             ),
             scan_limit=_limit_from_arg_env(args.scan_limit, "SCAN_LIMIT"),
             send_limit=_limit_from_arg_env(args.send_limit, "SEND_LIMIT"),
-            message_links=_split_csv(args.message_links, []),
+            message_links=(
+                _split_csv(args.message_links, [])
+                + _read_message_links_file(args.message_links_file)
+            ),
             dry_run=not args.execute,
             session_name=args.session_name or os.getenv("TG_SESSION_NAME", "telegram_backfill"),
             database_path=Path(args.database or os.getenv("DATABASE_PATH", "processed.sqlite3")),
@@ -178,6 +198,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--message-links",
         help="Optional comma-separated Telegram message links. When set, only those messages are copied.",
+    )
+    parser.add_argument(
+        "--message-links-file",
+        help="Optional text file with one Telegram message link per line.",
     )
     parser.add_argument("--execute", action="store_true", help="Actually send messages. Default is dry-run.")
     parser.add_argument("--session-name", help="Telethon session name/file prefix.")

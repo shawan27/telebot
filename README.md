@@ -137,6 +137,25 @@ python main.py \
 
 If a linked message is part of an album/grouped media post, the script attempts to copy the full album. SQLite duplicate tracking still applies, so rerunning the same links will skip messages already copied.
 
+You can also put links in a text file, one per line:
+
+```text
+https://t.me/ICT_CAPITAL/7390
+https://t.me/ICT_CAPITAL/7393
+```
+
+Then run:
+
+```bash
+python main.py \
+  --source "@ICT_CAPITAL" \
+  --target "@leakerzbang" \
+  --message-links-file links.txt \
+  --execute
+```
+
+You can combine `--message-links` and `--message-links-file`; both sets of links will be processed.
+
 ## Optional Filters
 
 Filters are optional. If you do not pass them, the script copies everything in the configured date range.
