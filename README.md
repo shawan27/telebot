@@ -135,7 +135,9 @@ python main.py \
   --execute
 ```
 
-If a linked message is part of an album/grouped media post, the script attempts to copy the full album. SQLite duplicate tracking still applies, so rerunning the same links will skip messages already copied.
+If a linked message is part of an album/grouped media post, the script attempts to copy the full album.
+
+Message-link mode is intentionally forceful: if a linked source message already exists as `copied` in `processed.sqlite3`, it will still be copied again. The database row is then updated with the latest target message IDs. If the same link appears more than once in the same command or links file, it is only processed once during that run.
 
 You can also put links in a text file, one per line:
 

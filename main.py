@@ -150,8 +150,9 @@ async def process_single_message(
     db: ProcessedDatabase,
     logger: logging.Logger,
     counters: Counters,
+    force_recopy: bool = False,
 ) -> None:
-    if db.is_copied(config.source_channel, message.id):
+    if db.is_copied(config.source_channel, message.id) and not force_recopy:
         counters.skipped += 1
         logger.info("SKIP already copied source_id=%s", message.id)
         return
@@ -195,25 +196,28 @@ async def process_album(
     db: ProcessedDatabase,
     logger: logging.Logger,
     counters: Counters,
+    force_recopy: bool = False,
 ) -> None:
     if not messages:
         return
 
     source_ids = [message.id for message in messages]
-    copied_ids = {
-        message_id
-        for message_id in source_ids
-        if db.is_copied(config.source_channel, message_id)
-    }
-    if len(copied_ids) == len(source_ids):
-        counters.skipped += len(source_ids)
-        logger.info("SKIP already copied album source_ids=%s", source_ids)
-        return
+    uncopied_messages = messages
+    if not force_recopy:
+        copied_ids = {
+            message_id
+            for message_id in source_ids
+            if db.is_copied(config.source_channel, message_id)
+        }
+        if len(copied_ids) == len(source_ids):
+            counters.skipped += len(source_ids)
+            logger.info("SKIP already copied album source_ids=%s", source_ids)
+            return
 
-    uncopied_messages = [message for message in messages if message.id not in copied_ids]
-    if copied_ids:
-        counters.skipped += len(copied_ids)
-        logger.info("SKIP already copied album items source_ids=%s", sorted(copied_ids))
+        uncopied_messages = [message for message in messages if message.id not in copied_ids]
+        if copied_ids:
+            counters.skipped += len(copied_ids)
+            logger.info("SKIP already copied album items source_ids=%s", sorted(copied_ids))
 
     selected, reason = selected_album_messages(uncopied_messages, config)
     if not selected:
@@ -314,13 +318,35 @@ async def process_message_links(
         if not messages:
             continue
 
+        for item in messages:
+            if db.is_copied(config.source_channel, item.id):
+                logger.info("FORCE link mode: recopying source_id=%s", item.id)
+
         counters.scanned += len(messages)
         processed_source_ids.update(item.id for item in messages)
 
         if len(messages) > 1 or messages[0].grouped_id:
-            await process_album(client, target, messages, config, db, logger, counters)
+            await process_album(
+                client,
+                target,
+                messages,
+                config,
+                db,
+                logger,
+                counters,
+                force_recopy=True,
+            )
         else:
-            await process_single_message(client, target, messages[0], config, db, logger, counters)
+            await process_single_message(
+                client,
+                target,
+                messages[0],
+                config,
+                db,
+                logger,
+                counters,
+                force_recopy=True,
+            )
 
 
 async def run(config: AppConfig) -> Counters:
