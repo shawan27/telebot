@@ -39,7 +39,13 @@ def media_kind(message: Message) -> Optional[str]:
 
     if suffix == ".pdf" or mime_type == "application/pdf":
         return "pdf"
-    if suffix == ".zip" or mime_type in {"application/zip", "application/x-zip-compressed"}:
+    if suffix in {".zip", ".rar", ".7z"} or mime_type in {
+        "application/zip",
+        "application/x-zip-compressed",
+        "application/vnd.rar",
+        "application/x-rar-compressed",
+        "application/x-7z-compressed",
+    }:
         return "zip"
     if message.document:
         return "document"

@@ -208,7 +208,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--database", help="SQLite database path.")
     parser.add_argument("--temp-dir", help="Temporary media download directory.")
     parser.add_argument("--log-file", help="Log file path.")
-    parser.add_argument("--retry-attempts", type=int, default=3, help="Retries for downloads/uploads.")
+    parser.add_argument("--retry-attempts", type=int, default=8, help="Retries for downloads/uploads.")
     parser.add_argument("--send-delay", type=float, default=1.5, help="Delay between copied posts/albums.")
     parser.add_argument("--history-wait", type=float, default=1.0, help="Wait time between history requests.")
     return parser

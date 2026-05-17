@@ -1,6 +1,6 @@
 # Telegram Channel Backfill Copier
 
-Copy all posts from one Telegram public channel into a channel you administer, using a Telethon user login. The script re-uploads content instead of forwarding it, so copied posts do not show a forwarded header.
+Copy Telegram channel content into a channel you administer, using a Telethon user login. The project includes both a command-line script and a simple PySide6 desktop app. Content is re-uploaded instead of forwarded, so copied posts do not show a forwarded header.
 
 This is for a one-time historical backfill only. It does not do live sync.
 
@@ -64,6 +64,39 @@ export TG_TARGET_CHANNEL="target_channel_username"
 ```
 
 Usernames can usually be plain usernames such as `some_public_channel`, `@some_public_channel`, or public channel links.
+
+## Desktop App
+
+Run the desktop app:
+
+```bash
+python app.py
+```
+
+The app has setup fields for API ID, API Hash, session name, source channel, and target channel. Click **Save Settings** to write them to local `config.json`; saved settings are loaded when the app starts. `config.json` is ignored by git and should stay private.
+
+The **Copy** tab supports three modes:
+
+- **Date range backfill**: scans the configured date range, oldest to newest.
+- **Message links**: paste one link per line, or comma-separated links.
+- **Message links file**: select a `links.txt` file with one Telegram message link per line.
+
+Both message-link modes force-recopy linked messages even if they already exist in `processed.sqlite3`, while avoiding duplicate links within the same run.
+
+Use **Dry Run** first to scan and preview what would happen without sending messages. Use **Start Copy** to actually re-upload. **Stop** requests safe cancellation, cleans temporary downloads where possible, and keeps already-copied SQLite rows intact.
+
+The progress panel shows current status, source message ID, filename, download/upload progress, transferred MB, approximate speed, and scanned/copied/skipped/failed counters. The logs panel mirrors important `copy.log` lines such as `DRY-RUN`, `DOWNLOADING`, `UPLOADING`, `COPIED`, `SKIP`, `FAILED`, `RETRY`, and `FloodWait`.
+
+Storage files:
+
+- `tmp_downloads/`: temporary media downloads; files are deleted after upload or failure.
+- `processed.sqlite3`: message IDs/status/target IDs for resume and duplicate tracking.
+- `copy.log`: run logs.
+- `config.json`: local desktop app settings, including API credentials.
+
+The **Clear Temp Downloads**, **Open Logs**, and **Open Project Folder** buttons handle those local files from the app.
+
+## CLI Usage
 
 ## Dry Run
 
