@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
 from typing import Callable, Optional
@@ -26,8 +26,18 @@ class Counters:
     failed: int = 0
 
 
-MESSAGE_LINK_RE = re.compile(r"(?:https?://)?t\.me/(?:c/\d+/|[^/]+/)(\d+)(?:[/?#].*)?$")
+PUBLIC_MESSAGE_LINK_RE = re.compile(
+    r"(?:https?://)?t\.me/(?:s/)?(?P<source>[A-Za-z0-9_]+)/(?P<message_id>\d+)(?:[/?#].*)?$"
+)
+PRIVATE_MESSAGE_LINK_RE = re.compile(r"(?:https?://)?t\.me/c/\d+/(?P<message_id>\d+)(?:[/?#].*)?$")
 ProgressCallback = Callable[[dict], None]
+
+
+@dataclass(frozen=True)
+class MessageLinkTarget:
+    source_channel: str
+    message_id: int
+    raw_link: str
 
 
 class ProgressReporter:
@@ -393,15 +403,40 @@ async def process_album(
         progress.counters(counters, "failed")
 
 
+def parse_message_target(link: str, fallback_source: str = "") -> MessageLinkTarget:
+    raw = link.strip()
+    match = PUBLIC_MESSAGE_LINK_RE.match(raw)
+    if match:
+        source = "@" + match.group("source").lstrip("@")
+        return MessageLinkTarget(source, int(match.group("message_id")), raw)
+
+    match = PRIVATE_MESSAGE_LINK_RE.match(raw)
+    if match and fallback_source:
+        return MessageLinkTarget(fallback_source, int(match.group("message_id")), raw)
+
+    if raw.isdigit() and fallback_source:
+        return MessageLinkTarget(fallback_source, int(raw), raw)
+
+    if match:
+        raise ValueError(
+            f"Link needs the Source channel fallback because the public username cannot be detected: {link}"
+        )
+    if raw.isdigit():
+        raise ValueError(f"Message ID {raw} needs the Source channel fallback.")
+
+    raise ValueError(
+        f"Could not parse Telegram message link: {link}. Use a public t.me/channel/message link or set Source as fallback."
+    )
+
+
 def parse_message_id(link: str) -> int:
     raw = link.strip()
-    match = MESSAGE_LINK_RE.match(raw)
-    if match:
-        return int(match.group(1))
-
+    for pattern in (PUBLIC_MESSAGE_LINK_RE, PRIVATE_MESSAGE_LINK_RE):
+        match = pattern.match(raw)
+        if match:
+            return int(match.group("message_id"))
     if raw.isdigit():
         return int(raw)
-
     raise ValueError(f"Could not parse Telegram message ID from link: {link}")
 
 
@@ -423,7 +458,6 @@ async def fetch_message_album(client, source, message: Message) -> list[Message]
 
 async def process_message_links(
     client,
-    source,
     target,
     config: AppConfig,
     db: ProcessedDatabase,
@@ -431,34 +465,48 @@ async def process_message_links(
     counters: Counters,
     progress: ProgressReporter,
 ) -> None:
-    processed_source_ids: set[int] = set()
-    message_ids = [parse_message_id(link) for link in config.message_links]
-    logger.info("Processing specific message links ids=%s", message_ids)
+    processed_source_ids: set[tuple[str, int]] = set()
+    targets = [parse_message_target(link, config.source_channel) for link in config.message_links]
+    grouped_sources = sorted({target.source_channel for target in targets})
+    source_entities = {}
+    logger.info("Processing specific message links sources=%s count=%s", grouped_sources, len(targets))
 
-    for message_id in message_ids:
+    for target_link in targets:
         if config.send_limit is not None and counters.copied >= config.send_limit:
             break
-        if message_id in processed_source_ids:
-            logger.info("SKIP already handled linked source_id=%s in this run", message_id)
+
+        source_key = target_link.source_channel
+        message_id = target_link.message_id
+        run_key = (source_key.lower(), message_id)
+        if run_key in processed_source_ids:
+            logger.info("SKIP already handled linked source=%s source_id=%s in this run", source_key, message_id)
             continue
 
+        if source_key not in source_entities:
+            source_entities[source_key] = await client.get_entity(source_key)
+        source = source_entities[source_key]
+        source_config = replace(config, source_channel=source_key)
         message = await client.get_messages(source, ids=message_id)
         if message is None:
             counters.failed += 1
-            logger.error("FAILED source_id=%s error=message not found", message_id)
+            logger.error("FAILED source=%s source_id=%s error=message not found", source_key, message_id)
             continue
 
         messages = await fetch_message_album(client, source, message)
-        messages = [item for item in messages if item.id not in processed_source_ids]
+        messages = [
+            item
+            for item in messages
+            if (source_key.lower(), item.id) not in processed_source_ids
+        ]
         if not messages:
             continue
 
         for item in messages:
-            if db.is_copied(config.source_channel, item.id):
-                logger.info("FORCE link mode: recopying source_id=%s", item.id)
+            if db.is_copied(source_key, item.id):
+                logger.info("FORCE link mode: recopying source=%s source_id=%s", source_key, item.id)
 
         counters.scanned += len(messages)
-        processed_source_ids.update(item.id for item in messages)
+        processed_source_ids.update((source_key.lower(), item.id) for item in messages)
         progress.counters(counters, "scanning")
 
         if len(messages) > 1 or messages[0].grouped_id:
@@ -466,7 +514,7 @@ async def process_message_links(
                 client,
                 target,
                 messages,
-                config,
+                source_config,
                 db,
                 logger,
                 counters,
@@ -478,7 +526,7 @@ async def process_message_links(
                 client,
                 target,
                 messages[0],
-                config,
+                source_config,
                 db,
                 logger,
                 counters,
@@ -515,12 +563,14 @@ async def run(
         try:
             progress.emit(status="scanning")
             async with create_client(config) as client:
-                source = await client.get_entity(config.source_channel)
                 target = await client.get_entity(config.target_channel)
 
                 if config.message_links:
-                    await process_message_links(client, source, target, config, db, logger, counters, progress)
+                    await process_message_links(client, target, config, db, logger, counters, progress)
                 else:
+                    if not config.source_channel:
+                        raise ValueError("Source channel is required for date range backfill mode.")
+                    source = await client.get_entity(config.source_channel)
                     async for message in iter_history_oldest_first(client, source, config):
                         progress.check_cancelled()
                         counters.scanned += 1

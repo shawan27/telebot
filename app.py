@@ -39,7 +39,7 @@ from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 
 from config import AppConfig, DEFAULT_ALLOWED_MEDIA, parse_date
-from main import run as run_copier
+from main import parse_message_target, run as run_copier
 from utils import cleanup_paths
 
 
@@ -282,11 +282,18 @@ class MainWindow(QMainWindow):
         channel_box = QGroupBox("Channels")
         channel_form = QFormLayout(channel_box)
         self.source_input = QLineEdit()
-        self.source_input.setPlaceholderText("@source_channel")
+        self.source_input.setPlaceholderText("@source_channel, optional for public message links")
         self.target_input = QLineEdit()
         self.target_input.setPlaceholderText("@target_channel")
         channel_form.addRow("Source channel", self.source_input)
         channel_form.addRow("Target channel", self.target_input)
+        source_help = QLabel(
+            "For message links, the app reads the source from public t.me links. "
+            "Use Source only as a fallback for plain message IDs or links without a public channel username. "
+            "Date range backfill still requires Source."
+        )
+        source_help.setWordWrap(True)
+        source_help.setStyleSheet("color: #555;")
 
         mode_box = QGroupBox("Copy Mode")
         mode_layout = QVBoxLayout(mode_box)
@@ -329,6 +336,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(step)
         layout.addWidget(channel_box)
+        layout.addWidget(source_help)
         layout.addWidget(mode_box)
         layout.addLayout(buttons)
         layout.addWidget(storage)
@@ -788,8 +796,8 @@ class MainWindow(QMainWindow):
         api_hash = self.api_hash_input.text().strip()
         source = self.source_input.text().strip()
         target = self.target_input.text().strip()
-        if not api_id or not api_hash or not source or not target:
-            raise ValueError("API ID, API Hash, Source channel, and Target channel are required.")
+        if not api_id or not api_hash or not target:
+            raise ValueError("API ID, API Hash, and Target channel are required.")
 
         mode_index = self.mode_combo.currentIndex()
         message_links: list[str] = []
@@ -801,6 +809,18 @@ class MainWindow(QMainWindow):
             message_links = self._read_links_file(self.links_file_input.text().strip())
             if not message_links:
                 raise ValueError("The selected links file has no links.")
+        else:
+            if not source:
+                raise ValueError("Source channel is required for date range backfill.")
+
+        if message_links:
+            for link in message_links:
+                try:
+                    parse_message_target(link, source)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{exc}\n\nAdd a Source channel fallback or use full public links like https://t.me/channel/123."
+                    ) from exc
 
         keywords = [item.strip() for item in self.keywords_input.text().split(",") if item.strip()]
         return AppConfig(

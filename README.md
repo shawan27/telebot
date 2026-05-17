@@ -107,6 +107,8 @@ The **Copy** tab supports three modes. The default is **Copy message links**, wh
 - **Message links file**: select a `links.txt` file with one Telegram message link per line.
 - **Date range backfill**: scans the configured date range, oldest to newest.
 
+Both message-link modes can copy links from multiple public source channels in the same run. For public links like `https://t.me/ICT_CAPITAL/7390`, the app reads `ICT_CAPITAL` from the link and fetches from that source channel automatically. The Source field is only a fallback for plain numeric message IDs or links where the public channel username cannot be detected. Date range backfill still requires Source.
+
 Both message-link modes force-recopy linked messages even if they already exist in `processed.sqlite3`, while avoiding duplicate links within the same run.
 
 Use **Dry Run** first to scan and preview what would happen without sending messages. Use **Start Copy** to actually re-upload. **Stop** requests safe cancellation, cleans temporary downloads where possible, and keeps already-copied SQLite rows intact.
@@ -181,18 +183,26 @@ Dry run specific links:
 
 ```bash
 python main.py \
-  --source "@ICT_CAPITAL" \
   --target "@leakerzbang" \
-  --message-links "https://t.me/ICT_CAPITAL/7390,https://t.me/ICT_CAPITAL/7393"
+  --message-links "https://t.me/ICT_CAPITAL/7390,https://t.me/OTHER_CHANNEL/7393"
 ```
 
 Actually copy specific links:
 
 ```bash
 python main.py \
+  --target "@leakerzbang" \
+  --message-links "https://t.me/ICT_CAPITAL/7390,https://t.me/OTHER_CHANNEL/7393" \
+  --execute
+```
+
+When every link contains a public channel username, `--source` is not required. Use `--source` only as a fallback for plain message IDs or links where the channel cannot be detected:
+
+```bash
+python main.py \
   --source "@ICT_CAPITAL" \
   --target "@leakerzbang" \
-  --message-links "https://t.me/ICT_CAPITAL/7390,https://t.me/ICT_CAPITAL/7393" \
+  --message-links "7390,7393" \
   --execute
 ```
 
@@ -211,13 +221,12 @@ Then run:
 
 ```bash
 python main.py \
-  --source "@ICT_CAPITAL" \
   --target "@leakerzbang" \
   --message-links-file links.txt \
   --execute
 ```
 
-You can combine `--message-links` and `--message-links-file`; both sets of links will be processed.
+`links.txt` can contain public links from multiple source channels. You can combine `--message-links` and `--message-links-file`; both sets of links will be processed.
 
 ## Optional Filters
 

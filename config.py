@@ -99,17 +99,19 @@ class AppConfig:
         api_hash = args.api_hash or os.getenv("TG_API_HASH")
         source_channel = args.source or os.getenv("TG_SOURCE_CHANNEL")
         target_channel = args.target or os.getenv("TG_TARGET_CHANNEL")
+        message_links = (
+            _split_csv(args.message_links, [])
+            + _read_message_links_file(args.message_links_file)
+        )
 
-        missing = [
-            name
-            for name, value in {
-                "api_id/TG_API_ID": api_id,
-                "api_hash/TG_API_HASH": api_hash,
-                "source/TG_SOURCE_CHANNEL": source_channel,
-                "target/TG_TARGET_CHANNEL": target_channel,
-            }.items()
-            if not value
-        ]
+        required = {
+            "api_id/TG_API_ID": api_id,
+            "api_hash/TG_API_HASH": api_hash,
+            "target/TG_TARGET_CHANNEL": target_channel,
+        }
+        if not message_links:
+            required["source/TG_SOURCE_CHANNEL"] = source_channel
+        missing = [name for name, value in required.items() if not value]
         if missing:
             raise ValueError("Missing required configuration: " + ", ".join(missing))
 
@@ -128,7 +130,7 @@ class AppConfig:
         return cls(
             api_id=int(api_id),
             api_hash=str(api_hash),
-            source_channel=str(source_channel),
+            source_channel=str(source_channel or ""),
             target_channel=str(target_channel),
             start_date=parse_date(args.start_date or os.getenv("START_DATE", "2024-01-01")),
             end_date=parse_date(args.end_date or os.getenv("END_DATE", "2026-05-15"), end_of_day=True),
@@ -144,10 +146,7 @@ class AppConfig:
             ),
             scan_limit=_limit_from_arg_env(args.scan_limit, "SCAN_LIMIT"),
             send_limit=_limit_from_arg_env(args.send_limit, "SEND_LIMIT"),
-            message_links=(
-                _split_csv(args.message_links, [])
-                + _read_message_links_file(args.message_links_file)
-            ),
+            message_links=message_links,
             dry_run=not args.execute,
             session_name=args.session_name or os.getenv("TG_SESSION_NAME", "telegram_backfill"),
             database_path=Path(args.database or os.getenv("DATABASE_PATH", "processed.sqlite3")),
