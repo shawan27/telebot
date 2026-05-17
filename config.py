@@ -66,6 +66,7 @@ class AppConfig:
     include_text_only_keyword_posts: bool
     scan_limit: Optional[int]
     send_limit: Optional[int]
+    message_links: list[str]
     dry_run: bool
     session_name: str
     database_path: Path
@@ -126,6 +127,7 @@ class AppConfig:
             ),
             scan_limit=_limit_from_arg_env(args.scan_limit, "SCAN_LIMIT"),
             send_limit=_limit_from_arg_env(args.send_limit, "SEND_LIMIT"),
+            message_links=_split_csv(args.message_links, []),
             dry_run=not args.execute,
             session_name=args.session_name or os.getenv("TG_SESSION_NAME", "telegram_backfill"),
             database_path=Path(args.database or os.getenv("DATABASE_PATH", "processed.sqlite3")),
@@ -173,6 +175,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--scan-limit", type=int, help="Maximum source messages to scan. 0 or omitted means unlimited.")
     parser.add_argument("--send-limit", type=int, help="Maximum matching source messages to send. 0 or omitted means unlimited.")
+    parser.add_argument(
+        "--message-links",
+        help="Optional comma-separated Telegram message links. When set, only those messages are copied.",
+    )
     parser.add_argument("--execute", action="store_true", help="Actually send messages. Default is dry-run.")
     parser.add_argument("--session-name", help="Telethon session name/file prefix.")
     parser.add_argument("--database", help="SQLite database path.")

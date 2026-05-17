@@ -112,6 +112,31 @@ python main.py \
 
 `--send-limit 0` means unlimited send, the same as omitting it.
 
+## Copy Specific Message Links
+
+Use `--message-links` to copy only specific Telegram message links. When this option is provided, the normal date-range history scan is skipped.
+
+Dry run specific links:
+
+```bash
+python main.py \
+  --source "@ICT_CAPITAL" \
+  --target "@leakerzbang" \
+  --message-links "https://t.me/ICT_CAPITAL/7390,https://t.me/ICT_CAPITAL/7393"
+```
+
+Actually copy specific links:
+
+```bash
+python main.py \
+  --source "@ICT_CAPITAL" \
+  --target "@leakerzbang" \
+  --message-links "https://t.me/ICT_CAPITAL/7390,https://t.me/ICT_CAPITAL/7393" \
+  --execute
+```
+
+If a linked message is part of an album/grouped media post, the script attempts to copy the full album. SQLite duplicate tracking still applies, so rerunning the same links will skip messages already copied.
+
 ## Optional Filters
 
 Filters are optional. If you do not pass them, the script copies everything in the configured date range.

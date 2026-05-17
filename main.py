@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,9 @@ class Counters:
     copied: int = 0
     skipped: int = 0
     failed: int = 0
+
+
+MESSAGE_LINK_RE = re.compile(r"(?:https?://)?t\.me/(?:c/\d+/|[^/]+/)(\d+)(?:[/?#].*)?$")
 
 
 async def download_message_media(client, message: Message, config: AppConfig, logger: logging.Logger) -> str:
@@ -196,16 +200,26 @@ async def process_album(
         return
 
     source_ids = [message.id for message in messages]
-    if all(db.is_copied(config.source_channel, message_id) for message_id in source_ids):
+    copied_ids = {
+        message_id
+        for message_id in source_ids
+        if db.is_copied(config.source_channel, message_id)
+    }
+    if len(copied_ids) == len(source_ids):
         counters.skipped += len(source_ids)
         logger.info("SKIP already copied album source_ids=%s", source_ids)
         return
 
-    selected, reason = selected_album_messages(messages, config)
+    uncopied_messages = [message for message in messages if message.id not in copied_ids]
+    if copied_ids:
+        counters.skipped += len(copied_ids)
+        logger.info("SKIP already copied album items source_ids=%s", sorted(copied_ids))
+
+    selected, reason = selected_album_messages(uncopied_messages, config)
     if not selected:
-        counters.skipped += len(source_ids)
+        counters.skipped += len(uncopied_messages)
         if not config.dry_run:
-            for message in messages:
+            for message in uncopied_messages:
                 db.mark_skipped(config.source_channel, message.id, reason)
         logger.info("SKIP album source_ids=%s reason=%s", source_ids, reason)
         return
@@ -229,7 +243,7 @@ async def process_album(
             grouped_id=messages[0].grouped_id,
         )
         counters.copied += len(selected_ids)
-        skipped_unselected = set(source_ids) - set(selected_ids)
+        skipped_unselected = {message.id for message in uncopied_messages} - set(selected_ids)
         for message_id in skipped_unselected:
             db.mark_skipped(config.source_channel, message_id, "album item did not match allowed media")
         logger.info("COPIED album source_ids=%s target_ids=%s", selected_ids, target_ids)
@@ -241,6 +255,74 @@ async def process_album(
         logger.exception("FAILED album source_ids=%s error=%s", selected_ids, exc)
 
 
+def parse_message_id(link: str) -> int:
+    raw = link.strip()
+    match = MESSAGE_LINK_RE.match(raw)
+    if match:
+        return int(match.group(1))
+
+    if raw.isdigit():
+        return int(raw)
+
+    raise ValueError(f"Could not parse Telegram message ID from link: {link}")
+
+
+async def fetch_message_album(client, source, message: Message) -> list[Message]:
+    if not message.grouped_id:
+        return [message]
+
+    start_id = max(1, message.id - 15)
+    end_id = message.id + 15
+    nearby_ids = list(range(start_id, end_id + 1))
+    nearby_messages = await client.get_messages(source, ids=nearby_ids)
+    album_messages = [
+        nearby_message
+        for nearby_message in nearby_messages
+        if nearby_message is not None and nearby_message.grouped_id == message.grouped_id
+    ]
+    return sorted(album_messages, key=lambda item: item.id) or [message]
+
+
+async def process_message_links(
+    client,
+    source,
+    target,
+    config: AppConfig,
+    db: ProcessedDatabase,
+    logger: logging.Logger,
+    counters: Counters,
+) -> None:
+    processed_source_ids: set[int] = set()
+    message_ids = [parse_message_id(link) for link in config.message_links]
+    logger.info("Processing specific message links ids=%s", message_ids)
+
+    for message_id in message_ids:
+        if config.send_limit is not None and counters.copied >= config.send_limit:
+            break
+        if message_id in processed_source_ids:
+            logger.info("SKIP already handled linked source_id=%s in this run", message_id)
+            continue
+
+        message = await client.get_messages(source, ids=message_id)
+        if message is None:
+            counters.failed += 1
+            logger.error("FAILED source_id=%s error=message not found", message_id)
+            continue
+
+        messages = await fetch_message_album(client, source, message)
+        messages = [item for item in messages if item.id not in processed_source_ids]
+        if not messages:
+            continue
+
+        counters.scanned += len(messages)
+        processed_source_ids.update(item.id for item in messages)
+
+        if len(messages) > 1 or messages[0].grouped_id:
+            await process_album(client, target, messages, config, db, logger, counters)
+        else:
+            await process_single_message(client, target, messages[0], config, db, logger, counters)
+
+
 async def run(config: AppConfig) -> Counters:
     logger = setup_logging(config.log_file)
     db = ProcessedDatabase(config.database_path)
@@ -249,7 +331,10 @@ async def run(config: AppConfig) -> Counters:
     pending_grouped_id: Optional[int] = None
 
     logger.info("Starting %s", "dry-run" if config.dry_run else "copy")
-    logger.info("Date range UTC: %s to %s", config.start_date.isoformat(), config.end_date.isoformat())
+    if config.message_links:
+        logger.info("Message-link mode enabled; skipping date-range history scan")
+    else:
+        logger.info("Date range UTC: %s to %s", config.start_date.isoformat(), config.end_date.isoformat())
     logger.info("Keywords=%s allowed_media=%s", config.keywords, sorted(config.allowed_media))
 
     try:
@@ -257,33 +342,36 @@ async def run(config: AppConfig) -> Counters:
             source = await client.get_entity(config.source_channel)
             target = await client.get_entity(config.target_channel)
 
-            async for message in iter_history_oldest_first(client, source, config):
-                counters.scanned += 1
+            if config.message_links:
+                await process_message_links(client, source, target, config, db, logger, counters)
+            else:
+                async for message in iter_history_oldest_first(client, source, config):
+                    counters.scanned += 1
 
-                if (
-                    config.send_limit is not None
-                    and counters.copied >= config.send_limit
-                    and not pending_album
-                ):
-                    break
+                    if (
+                        config.send_limit is not None
+                        and counters.copied >= config.send_limit
+                        and not pending_album
+                    ):
+                        break
 
-                if message.grouped_id:
-                    if pending_album and message.grouped_id != pending_grouped_id:
+                    if message.grouped_id:
+                        if pending_album and message.grouped_id != pending_grouped_id:
+                            await process_album(client, target, pending_album, config, db, logger, counters)
+                            pending_album = []
+                        pending_grouped_id = message.grouped_id
+                        pending_album.append(message)
+                        continue
+
+                    if pending_album:
                         await process_album(client, target, pending_album, config, db, logger, counters)
                         pending_album = []
-                    pending_grouped_id = message.grouped_id
-                    pending_album.append(message)
-                    continue
+                        pending_grouped_id = None
+
+                    await process_single_message(client, target, message, config, db, logger, counters)
 
                 if pending_album:
                     await process_album(client, target, pending_album, config, db, logger, counters)
-                    pending_album = []
-                    pending_grouped_id = None
-
-                await process_single_message(client, target, message, config, db, logger, counters)
-
-            if pending_album:
-                await process_album(client, target, pending_album, config, db, logger, counters)
 
     finally:
         db.close()
