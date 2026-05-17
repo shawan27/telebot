@@ -73,13 +73,39 @@ Run the desktop app:
 python app.py
 ```
 
-The app has setup fields for API ID, API Hash, session name, source channel, and target channel. Click **Save Settings** to write them to local `config.json`; saved settings are loaded when the app starts. `config.json` is ignored by git and should stay private.
+The app has four simple tabs:
 
-The **Copy** tab supports three modes:
+- **Connect**: log in to Telegram inside the app.
+- **Copy**: choose source, target, and copy mode.
+- **Progress**: watch current file progress and live logs.
+- **Settings**: adjust date range, limits, filters, and retry settings.
 
-- **Date range backfill**: scans the configured date range, oldest to newest.
+### Log In From The App
+
+Open the **Connect** tab and enter:
+
+- API ID
+- API Hash
+- Session name
+- Phone number
+
+Click **Send Login Code**, enter the code Telegram sends you, then click **Verify Code**. If your account has 2FA enabled, the app will show a 2FA password box; enter it and click **Verify Password**.
+
+After login, the app shows `Connected` and the account identity. The Telegram session is saved as a local `.session` file, so you usually do not need to log in again next time.
+
+Click **Check Session** to refresh session status. If the session is expired, log in again. Click **Disconnect / Reset Session** to delete the selected local session file after confirmation.
+
+The app does not write your API hash, login code, or 2FA password to `copy.log`.
+
+Click **Save Settings** to write app settings to local `config.json`; saved settings are loaded when the app starts. `config.json` is ignored by git and should stay private.
+
+### Copy Modes
+
+The **Copy** tab supports three modes. The default is **Copy message links**, which is usually the easiest.
+
 - **Message links**: paste one link per line, or comma-separated links.
 - **Message links file**: select a `links.txt` file with one Telegram message link per line.
+- **Date range backfill**: scans the configured date range, oldest to newest.
 
 Both message-link modes force-recopy linked messages even if they already exist in `processed.sqlite3`, while avoiding duplicate links within the same run.
 
@@ -95,6 +121,8 @@ Storage files:
 - `config.json`: local desktop app settings, including API credentials.
 
 The **Clear Temp Downloads**, **Open Logs**, and **Open Project Folder** buttons handle those local files from the app.
+
+If the connection drops, leave retry attempts at the default `8` and run again if needed. The app retries connection resets, timeouts, and temporary Telegram errors with backoff. Normal backfill mode resumes from `processed.sqlite3`; message-link modes intentionally recopy the explicit links you provide.
 
 ## CLI Usage
 
